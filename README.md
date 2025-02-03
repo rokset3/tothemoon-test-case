@@ -29,8 +29,6 @@ Unfortunately I could not allocate 100% of time I had, due to health & personal 
 
 * Did Arima & boosting with simple text
 
-So in total I spent ~10hrs on this work, but I wish I could spent more
-
 What wanted I originally wanted to try also
 * A LOT More EDA & feature engineering (adding MACD-like signals and etc.)
 * Try facebook prophet
