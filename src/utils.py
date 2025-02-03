@@ -1,12 +1,18 @@
+import re
 import numpy as np
 import pandas as pd
-from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from tqdm import tqdm
-import re
+from statistics import mean
+
 import nltk
 from nltk.corpus import stopwords
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+
+
 nltk.download('stopwords')
 stop_words = set(stopwords.words('english'))
+
+
 def get_data(data_path):
     df = pd.read_csv(data_path).drop(columns=['Unnamed: 0'])
     df['date'] = pd.to_datetime(df['date'])
@@ -14,51 +20,19 @@ def get_data(data_path):
     return df
 
 def compute_pnl(df, pos_col="pos_size", price_col="price"):
-    """
-    A simpler, mark-to-market P&L calculation:
-      PnL(t) = Position(t-1) * (Price(t) - Price(t-1))
-
-    Arguments:
-        df: A pandas DataFrame with columns [pos_col, price_col]
-        pos_col: Name of the column containing position sizes (long=+, short=-)
-        price_col: Name of the column containing prices
-
-    Returns:
-        The same DataFrame with new columns:
-            'pnl': Instantaneous P&L at each row
-            'cumulative_pnl': Cumulative sum of P&L
-    """
-    # Safety checks
     if pos_col not in df.columns or price_col not in df.columns:
         raise ValueError(
             f"DataFrame must contain '{pos_col}' and '{price_col}' columns."
         )
-
-    # Convert to NumPy arrays
     pos_array = df[pos_col].to_numpy(dtype=float)
     price_array = df[price_col].to_numpy(dtype=float)
     n = len(df)
-
-    # 1) Shift the position by 1 (so row t uses the position from t-1)
-    #    For the first row, we assume position(t-1) = 0
     pos_shifted = np.roll(pos_array, shift=1)
     pos_shifted[0] = 0.0  # at row 0, there's no "prior" position in this scheme
-
-    # 2) Compute price differences: price[t] - price[t-1]
-    #    For row 0, we can define diff=0 or skip entirely. We'll set row 0's diff=0.
     price_diff = np.diff(np.insert(price_array, 0, price_array[0]))
-    # Explanation:
-    #  - np.insert(..., 0, price_array[0]) duplicates the first price at the start
-    #  - np.diff(...) then yields differences across the new array
-    #  - The first difference (row 0) will be 0, because price_array[0] - price_array[0] = 0.
-
-    # 3) Multiply to get instantaneous PnL
     pnl_array = pos_shifted * price_diff
-
-    # 4) Cumulative sum
     cum_pnl_array = np.cumsum(pnl_array)
 
-    # Assign results back to DataFrame
     df[f"{price_col}_pnl"] = pnl_array
     df[f"{price_col}_cumulative_pnl"] = cum_pnl_array
 
@@ -69,21 +43,14 @@ def ema(series, span: int):
 
 def compute_macd(df, short_span: int, long_span: int, signal_span: int,
                  price_col="close", macd_col="pos_macd"):
-    """
-    Compute MACD with user-defined EMA spans, then assign a position:
-      +1 if MACD > Signal, else -1.
-    Returns a copy of df with columns: macd_col, and intermediate columns [macd, signal].
-    """
     df = df.copy()
     
     df["ema_short"] = ema(df[price_col], short_span)
     df["ema_long"] = ema(df[price_col], long_span)
     df["macd"] = df["ema_short"] - df["ema_long"]
     df["signal"] = ema(df["macd"], signal_span)
-    
-    # Position: +1 if MACD>Signal else -1
+
     df[macd_col] = (df["macd"] > df["signal"]).astype(int) * 2 - 1
-    # Explanation: True->1 => 2*1-1=+1, False->0 => 2*0-1=-1
     
     return df
 
@@ -128,9 +95,6 @@ def evaluate_macd_grid(df, val_windows, param_grid, date_col="timestamp", price_
       3) Average across folds.
     Returns a DataFrame summarizing results for each parameter set.
     """
-    from statistics import mean
-
-    # 1) Create the folds
     folds = create_expanding_splits(df, val_windows, date_col=date_col)
 
     results = []
@@ -139,7 +103,6 @@ def evaluate_macd_grid(df, val_windows, param_grid, date_col="timestamp", price_
         
         for (train_df, val_df) in folds:
             if val_df.empty or train_df.empty:
-                # skip if there's no data to validate
                 continue
             
             val_pnl = evaluate_macd_on_fold(
